@@ -53,5 +53,46 @@ RSpec.describe FetchUpstreamPackageVersionJob, :vcr do
         end
       end
     end
+
+    context 'when the upstream service times out' do
+      before do
+        allow(Rails.logger).to receive(:warn)
+      end
+
+      context 'with connection timeout' do
+        before do
+          allow(Net::HTTP).to receive(:new).and_raise(Net::OpenTimeout)
+        end
+
+        it 'logs a warning and continues processing' do
+          described_class.perform_now(project_name: project.name)
+          expect(Rails.logger).to have_received(:warn).with(/Timeout while fetching upstream package info/)
+        end
+
+        it 'does not create a package version upstream record' do
+          expect { described_class.perform_now(project_name: project.name) }.not_to change(PackageVersionUpstream, :count)
+        end
+      end
+
+      context 'with read timeout' do
+        before do
+          http_instance = instance_double(Net::HTTP)
+          allow(Net::HTTP).to receive(:new).and_return(http_instance)
+          allow(http_instance).to receive(:use_ssl=)
+          allow(http_instance).to receive(:open_timeout=)
+          allow(http_instance).to receive(:read_timeout=)
+          allow(http_instance).to receive(:request).and_raise(Net::ReadTimeout)
+        end
+
+        it 'logs a warning and continues processing' do
+          described_class.perform_now(project_name: project.name)
+          expect(Rails.logger).to have_received(:warn).with(/Timeout while fetching upstream package info/)
+        end
+
+        it 'does not create a package version upstream record' do
+          expect { described_class.perform_now(project_name: project.name) }.not_to change(PackageVersionUpstream, :count)
+        end
+      end
+    end
   end
 end
